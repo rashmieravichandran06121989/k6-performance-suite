@@ -1,11 +1,6 @@
-// tests/load/load-test.ts
-// Day 2 — load test. Realistic production traffic at 50 VUs over 5 minutes.
-
-import { check } from "k6";
+import { check, sleep } from "k6";
 import http from "k6/http";
 import { Options } from "k6/options";
-import { BASE_URL, DEFAULT_HEADERS, GLOBAL_THRESHOLDS, tag } from "../../config/environments";
-import { assertResponse, assertJsonKeys, thinkTime, logStep } from "../../utils/helpers";
 
 export const options: Options = {
   stages: [
@@ -14,46 +9,31 @@ export const options: Options = {
     { duration: "1m", target: 0 },
   ],
   thresholds: {
-    ...GLOBAL_THRESHOLDS,
     http_req_duration: ["p(95)<500", "p(99)<800"],
+    http_req_failed: ["rate<0.01"],
+    checks: ["rate>=0.95"],
   },
 };
 
 export default function () {
   const page = ((__ITER % 2) + 1);
-  logStep(`VU ${__VU} — GET /users?page=${page}`);
-  const listRes = http.get(`${BASE_URL}/users?page=${page}`, {
-    headers: DEFAULT_HEADERS,
-    ...tag("load-list"),
-  });
-  assertResponse(listRes, 200, 500);
-  assertJsonKeys(listRes, ["data", "total"]);
 
-  thinkTime(1, 3);
-
-  const userId = Math.floor(Math.random() * 12) + 1;
-  const singleRes = http.get(`${BASE_URL}/users/${userId}`, {
-    headers: DEFAULT_HEADERS,
-    ...tag("load-single"),
-  });
-  assertResponse(singleRes, 200, 500);
-
-  thinkTime(1, 2);
-
-  logStep(`VU ${__VU} — POST /register`);
-  const registerRes = http.post(
-    `${BASE_URL}/register`,
-    JSON.stringify({ email: "eve.holt@reqres.in", password: "pistol" }),
-    { headers: DEFAULT_HEADERS, ...tag("load-register") }
+  const listRes = http.get(
+    `https://jsonplaceholder.typicode.com/users?_page=${page}`,
+    { headers: { "Content-Type": "application/json" } }
   );
-  check(registerRes, {
-    "register: status 200": (r) => r.status === 200,
-    "register: token present": (r) => {
-      const body = JSON.parse(r.body as string);
-      return typeof body.token === "string" && body.token.length > 0;
-    },
+
+  check(listRes, {
+    "list: status 200": (r) => r.status === 200,
+    "list: response < 500ms": (r) => r.timings.duration < 500,
   });
 
-  thinkTime(0.5, 1.5);
-}
-# staged ramp load test
+  sleep(1);
+
+  const userId = Math.floor(Math.random() * 10) + 1;
+  const singleRes = http.get(
+    `https://jsonplaceholder.typicode.com/users/${userId}`,
+    { headers: { "Content-Type": "application/json" } }
+  );
+
+  che
