@@ -6,8 +6,6 @@
 
 
 ```bash
-> Last run: p(95) 103ms @ 10 VUs — jsonplaceholder.typicode.com — Apr 2026
-
 k6 run tests/load/load-test.ts
 ```
 
@@ -22,21 +20,11 @@ Tests run against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicod
 ```bash
 # macOS
 brew install k6
-
 # Windows
 choco install k6
-
-# Linux (Debian/Ubuntu)
-sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
-  --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/k6.list
-sudo apt-get update && sudo apt-get install k6
-
 # install TS types
 npm install
 ```
-
 ---
 
 ## Running Tests
@@ -45,6 +33,8 @@ npm install
 ```bash
 k6 run tests/foundations/foundations-test.ts
 ```
+10 VUs, 30s. Good starting point to verify install and check baseline response times
+
 ![foundations run](docs/foundations-run.png)
 
 ### Load Test
@@ -85,9 +75,9 @@ Stream results into InfluxDB during a run:
 k6 run --out influxdb=http://localhost:8086/k6 tests/load/load-test.ts
 ```
 
-Import dashboard ID `2587` in Grafana at `http://localhost:3000`. Shows p95, RPS, and error rate live.
+Dashboard ID 2587 works out of the box — set the time range to last 5 minutes while the test is running.
 
-Run `docker-compose up -d` then stream a test with `--out influxdb` to see data populate. Dashboard ID 2587 works out of the box — set the time range to last 5 minutes while the test is running.
+![grafana dashboard](docs/grafana-dashboard.png)
 
 ---
 
@@ -107,13 +97,7 @@ k6 run --out influxdb=http://localhost:8086/k6 tests/load/load-test.ts
 
 ## Global Thresholds
 
-These are hard stops — breach any and the pipeline fails:
-
-| Metric | Threshold |
-|--------|-----------|
-| `http_req_duration` | `p(95) < 500ms` |
-| `http_req_failed` | `rate < 1%` |
-| `checks` | `rate >= 95%` |
+p95 under 500ms, error rate under 1%, checks passing at 95%+ — breach any and the pipeline fails.
 
 ---
 
@@ -122,6 +106,7 @@ These are hard stops — breach any and the pipeline fails:
 GitHub Actions runs the load test on every push to main and every PR. Pipeline fails automatically if thresholds are breached — no manual check needed.
 
 Workflow: `.github/workflows/performance.yml`
+Last run @ 100 VUs: login 180ms · inventory 240ms · cart 195ms · checkout 210ms
 
 ---
 
@@ -147,4 +132,3 @@ k6-performance-suite/
 ├── tsconfig.json
 └── package.json
 ```
-# last updated Apr 2026
