@@ -15,7 +15,7 @@ Performance testing suite built with k6 and TypeScript. Covers load, stress, soa
 
 ## Prerequisites
 
-Tests run against [reqres.in](https://reqres.in) by default — no auth needed.
+Tests run against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com) by default — no auth needed.
 
 ```bash
 # macOS
@@ -55,7 +55,7 @@ Ramps to 20 VUs, holds at 50 for 3m, ramps down. Mimics normal production traffi
 ```bash
 k6 run tests/stress/stress-test.ts
 ```
-50 → 100 → 150 → 200 VUs, 2-3m per step, then recovery. Errors start appearing around 150 VUs on reqres — that's expected, that's the point.
+50 → 100 → 150 → 200 VUs, 2-3m per step, then recovery. Errors start appearing around 150 VUs on jsonplaceholder — that's expected, that's the point.
 
 ### Soak Test
 ```bash
