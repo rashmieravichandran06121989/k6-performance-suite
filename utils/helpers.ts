@@ -59,3 +59,4 @@ export function thinkTime(minSec = 1, maxSec = 3): void {
 export function logStep(step: string): void {
   console.log(`[${new Date().toISOString()}] ${step}`);
 }
+# custom metrics for error rate and response time
