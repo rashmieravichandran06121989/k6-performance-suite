@@ -6,6 +6,8 @@
 
 
 ```bash
+> Last run: p(95) 103ms @ 10 VUs — jsonplaceholder.typicode.com — Apr 2026
+
 k6 run tests/load/load-test.ts
 ```
 
@@ -67,7 +69,7 @@ k6 run tests/soak/soak-test.ts
 ```bash
 k6 run tests/scenarios/sauce-demo.ts
 ```
-100 concurrent users through login → inventory → cart → checkout. Per-flow latency tracked via custom `Trend` metrics.
+100 concurrent users through login → inventory → cart → checkout. Per-flow latency tracked via custom `Trend` metrics. Inventory page is consistently the slowest stage — 20-30ms higher than the rest at 100 VUs.
 
 ---
 
@@ -85,7 +87,7 @@ k6 run --out influxdb=http://localhost:8086/k6 tests/load/load-test.ts
 
 Import dashboard ID `2587` in Grafana at `http://localhost:3000`. Shows p95, RPS, and error rate live.
 
-Screenshots in `/docs` once wired up — TODO.
+Run `docker-compose up -d` then stream a test with `--out influxdb` to see data populate. Dashboard ID 2587 works out of the box — set the time range to last 5 minutes while the test is running.
 
 ---
 
@@ -134,11 +136,11 @@ k6-performance-suite/
 ├── utils/
 │   └── helpers.ts           # shared helpers
 ├── tests/
-│   ├── foundations/         # Day 1 — 10 VUs / 30s
-│   ├── load/                # Day 2 — 50 VUs / 5 min
-│   ├── stress/              # Day 2 — 0→200 VUs
-│   ├── soak/                # Day 2 — 30 VUs / 30 min
-│   └── scenarios/           # Day 5 — real multi-step flows
+│   ├── foundations/         # baseline — 10 VUs / 30s
+│   ├── load/                # load — staged ramp to 50 VUs
+│   ├── stress/              # stress — 0→200 VUs breaking point
+│   ├── soak/                # endurance — 30 VUs / 30 min
+│   └── scenarios/           # e2e — Sauce Demo full user journey
 ├── docs/                    # screenshots and result exports
 ├── reports/                 # local JSON/HTML output (gitignored)
 ├── docker-compose.yml       # InfluxDB + Grafana stack
