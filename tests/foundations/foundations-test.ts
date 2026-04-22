@@ -53,3 +53,4 @@ export default function () {
 
   thinkTime(0.5, 1.5);
 }
+# 10 VUs, 30s baseline test
