@@ -82,3 +82,4 @@ export default function () {
 
   thinkTime(1, 2);
 }
+# soak test — watch for p95 drift
