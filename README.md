@@ -106,6 +106,17 @@ p95 under 500ms, error rate under 1%, checks passing at 95%+ — breach any and 
 GitHub Actions runs the load test on every push to main and every PR. Pipeline fails automatically if thresholds are breached — no manual check needed.
 
 Workflow: `.github/workflows/performance.yml`
+
+Last run took about 5 minutes — the load test itself is the bottleneck, not the install step.
+
+**SLA gate confirmed — threshold breach causes immediate pipeline failure:**
+
+![actions failing](docs/actions-failing.png)
+
+**Restored and passing:**
+
+![actions passing](docs/actions-passing.png)
+
 Last run @ 100 VUs: login 180ms · inventory 240ms · cart 195ms · checkout 210ms
 
 ---
