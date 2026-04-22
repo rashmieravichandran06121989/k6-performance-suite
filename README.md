@@ -43,7 +43,6 @@ npm install
 ```bash
 k6 run tests/foundations/foundations-test.ts
 ```
-10 VUs, 30s. Good starting point to verify install and check baseline response times.
 ![foundations run](docs/foundations-run.png)
 
 ### Load Test
