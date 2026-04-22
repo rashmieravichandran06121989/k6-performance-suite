@@ -25,13 +25,14 @@ jobs:
           sudo apt-get update && sudo apt-get install k6
 
       - name: Run load test
-        run: k6 run tests/load/load-test.ts
-        # Pipeline fails automatically if p(95) > 500ms or error rate > 1%
-        # Thresholds are enforced in config/environments.ts
+        run: |
+          mkdir -p reports
+          k6 run --out json=reports/results.json tests/load/load-test.ts
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-results
-          path: reports/
+          path: reports/results.json
+          if-no-files-found: ignore
