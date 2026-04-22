@@ -56,3 +56,4 @@ export default function () {
 
   thinkTime(0.5, 1.5);
 }
+# staged ramp load test
