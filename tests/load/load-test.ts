@@ -31,9 +31,28 @@ export default function () {
   sleep(1);
 
   const userId = Math.floor(Math.random() * 10) + 1;
+
   const singleRes = http.get(
     `https://jsonplaceholder.typicode.com/users/${userId}`,
     { headers: { "Content-Type": "application/json" } }
   );
 
-  che
+  check(singleRes, {
+    "single: status 200": (r) => r.status === 200,
+    "single: response < 500ms": (r) => r.timings.duration < 500,
+  });
+
+  sleep(1);
+
+  const createRes = http.post(
+    "https://jsonplaceholder.typicode.com/posts",
+    JSON.stringify({ title: "load test", body: "k6 run", userId: __VU }),
+    { headers: { "Content-Type": "application/json" } }
+  );
+
+  check(createRes, {
+    "create: status 201": (r) => r.status === 201,
+  });
+
+  sleep(1);
+}
