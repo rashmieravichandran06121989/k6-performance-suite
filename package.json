@@ -1,0 +1,17 @@
+{
+  "name": "k6-performance-suite",
+  "version": "1.0.0",
+  "description": "SDET & Quality Architect k6 Performance Testing Suite - Rashmie Ravichandran",
+  "scripts": {
+    "test:foundations": "k6 run tests/foundations/foundations-test.ts",
+    "test:load": "k6 run tests/load/load-test.ts",
+    "test:stress": "k6 run tests/stress/stress-test.ts",
+    "test:soak": "k6 run tests/soak/soak-test.ts",
+    "test:all": "npm run test:load && npm run test:stress && npm run test:soak",
+    "report:html": "k6 run --out json=reports/results.json tests/load/load-test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/k6": "^0.52.0"
+  }
+}

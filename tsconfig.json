@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["ES2017"],
+    "moduleResolution": "node",
+    "strict": true,
+    "noEmit": true,
+    "types": ["k6"]
+  },
+  "include": ["tests/**/*.ts", "utils/**/*.ts", "config/**/*.ts"]
+}
