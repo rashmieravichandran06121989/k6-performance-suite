@@ -2,6 +2,9 @@
 
 ![k6 Performance Tests](https://github.com/rashmieravichandran06121989/k6-performance-suite/actions/workflows/performance.yml/badge.svg)
 
+> Last run: p(95) 103ms @ 10 VUs — jsonplaceholder.typicode.com — Apr 2026
+
+
 ```bash
 k6 run tests/load/load-test.ts
 ```
@@ -41,6 +44,7 @@ npm install
 k6 run tests/foundations/foundations-test.ts
 ```
 10 VUs, 30s. Good starting point to verify install and check baseline response times.
+![foundations run](docs/foundations-run.png)
 
 ### Load Test
 ```bash
