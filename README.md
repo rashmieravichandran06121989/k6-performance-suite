@@ -47,7 +47,7 @@ Ramps to 20 VUs, holds at 50 for 3m, ramps down. Mimics normal production traffi
 ```bash
 k6 run tests/stress/stress-test.ts
 ```
-50 → 100 → 150 → 200 VUs, 2-3m per step, then recovery. Errors start appearing around 150 VUs on jsonplaceholder — watch the error rate climb, that's your breaking point.
+50 → 100 → 150 → 200 VUs, 2-3m per step, then recovery. Errors start appearing around 150 VUs on jsonplaceholder — watch the error rate climb, that's the breaking point.
 
 ### Soak Test
 ```bash
