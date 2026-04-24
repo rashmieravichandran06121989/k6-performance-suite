@@ -5,5 +5,11 @@ datasources:
     access: proxy
     url: http://influxdb:8086
     database: k6
+    user: ${INFLUX_USER}
+    secureJsonData:
+      password: ${INFLUX_USER_PASSWORD}
     isDefault: true
-    editable: true
+    editable: false
+    jsonData:
+      timeInterval: "5s"
+      httpMode: GET

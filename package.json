@@ -1,17 +1,36 @@
 {
   "name": "k6-performance-suite",
-  "version": "1.0.0",
-  "description": "SDET & Quality Architect k6 Performance Testing Suite - Rashmie Ravichandran",
+  "version": "2.0.0",
+  "description": "k6 performance testing suite — multi-env, fluent HTTP client, SLA strategy, hardened CI/CD.",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "test:foundations": "k6 run tests/foundations/foundations-test.ts",
-    "test:load": "k6 run tests/load/load-test.ts",
-    "test:stress": "k6 run tests/stress/stress-test.ts",
-    "test:soak": "k6 run tests/soak/soak-test.ts",
-    "test:all": "npm run test:load && npm run test:stress && npm run test:soak",
-    "report:html": "k6 run --out json=reports/results.json tests/load/load-test.ts"
+    "k6":               "k6 run --compatibility-mode=experimental_enhanced",
+    "preready":         "mkdir -p reports",
+    "test:foundations": "npm run preready && npm run k6 -- tests/foundations/foundations-test.ts",
+    "test:load":        "npm run preready && npm run k6 -- tests/load/load-test.ts",
+    "test:stress":      "npm run preready && npm run k6 -- tests/stress/stress-test.ts",
+    "test:soak":        "npm run preready && npm run k6 -- tests/soak/soak-test.ts",
+    "test:scenarios":   "npm run preready && npm run k6 -- tests/scenarios/ecommerce-journey.ts",
+    "test:fast":        "npm run test:foundations && npm run test:load && npm run test:scenarios",
+    "test:full":        "npm run test:fast && npm run test:stress && npm run test:soak",
+    "report:local":     "npm run preready && npm run k6 -- --out json=reports/results.json tests/load/load-test.ts",
+    "lint":             "eslint \"{tests,utils,config}/**/*.ts\"",
+    "lint:fix":         "eslint \"{tests,utils,config}/**/*.ts\" --fix",
+    "format":           "prettier --write \"{tests,utils,config}/**/*.ts\"",
+    "format:check":     "prettier --check \"{tests,utils,config}/**/*.ts\"",
+    "typecheck":        "tsc --noEmit",
+    "ci:verify":        "npm run lint && npm run format:check && npm run typecheck"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/k6": "^0.52.0"
+    "@types/k6":                      "^0.54.0",
+    "@typescript-eslint/eslint-plugin":"^7.18.0",
+    "@typescript-eslint/parser":       "^7.18.0",
+    "eslint":                          "^8.57.0",
+    "eslint-config-prettier":          "^9.1.0",
+    "prettier":                        "^3.3.3",
+    "typescript":                      "^5.5.4"
   }
 }

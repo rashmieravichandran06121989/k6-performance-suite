@@ -1,11 +1,28 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["ES2017"],
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "ESNext",
     "moduleResolution": "node",
     "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
     "noEmit": true,
-    "types": ["k6"]
+    "allowImportingTsExtensions": true,
+    "types": ["k6"],
+    "baseUrl": ".",
+    "paths": {
+      "@config/*": ["config/*"],
+      "@utils/*":  ["utils/*"]
+    }
   },
-  "include": ["tests/**/*.ts", "utils/**/*.ts", "config/**/*.ts"]
+  "include": ["tests/**/*.ts", "utils/**/*.ts", "config/**/*.ts", "utils/globals.d.ts"],
+  "exclude": ["node_modules", "reports", "dist"]
 }

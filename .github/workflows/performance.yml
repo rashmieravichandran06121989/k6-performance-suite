@@ -1,35 +1,253 @@
-name: k6 Performance Tests
+name: k6 Performance Suite
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "Environment to run against"
+        required: true
+        default: "sandbox"
+        type: choice
+        options: [sandbox, dev, staging]
+      suite:
+        description: "Which test(s) to run"
+        required: true
+        default: "fast"
+        type: choice
+        options: [fast, full, soak_only]
+
+# Cancel superseded runs on the same ref — saves CI minutes on rapid pushes.
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # for the summary comment
+  security-events: write # for SARIF upload from Trivy
+
+env:
+  K6_VERSION: "0.54.0"
+  NODE_VERSION: "20"
+  K6_ENV: ${{ github.event.inputs.target_env || 'sandbox' }}
 
 jobs:
-  load-test:
-    name: Load Test — SLA Gate
+  # ──────────────────────────────────────────────────────────────────
+  # Stage 1: static quality gates. Fail fast before burning perf time.
+  # ──────────────────────────────────────────────────────────────────
+  static_checks:
+    name: Lint · Typecheck · Secret scan
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stage 2: SAST + dependency scan. Runs in parallel with static_checks.
+  # ──────────────────────────────────────────────────────────────────
+  security_scan:
+    name: SAST · Trivy FS + config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # 0.24.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@4fa2a7953630fd2f3fb380f21be14ede0169dd4f # v3.25.15
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stage 3: parallel perf suite. Each test type is its own shard so a
+  # stress failure doesn't block the load signal and vice-versa.
+  # ──────────────────────────────────────────────────────────────────
+  perf:
+    name: k6 · ${{ matrix.suite }}
+    needs: [static_checks, security_scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - foundations
+          - load
+          - stress
+          - scenarios
+        include:
+          - suite: foundations
+            script: tests/foundations/foundations-test.ts
+            sla_gate: true
+          - suite: load
+            script: tests/load/load-test.ts
+            sla_gate: true
+          - suite: stress
+            script: tests/stress/stress-test.ts
+            sla_gate: false  # stress is informational, not a blocker
+          - suite: scenarios
+            script: tests/scenarios/ecommerce-journey.ts
+            sla_gate: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Install k6 (pinned ${{ env.K6_VERSION }})
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "k6-v${K6_VERSION}-linux-amd64/k6"
+          k6 version
+
+      - name: Run ${{ matrix.suite }}
+        id: run
+        env:
+          K6_SUMMARY_EXPORT: reports/${{ matrix.suite }}-summary.json
+          # Stress is informational — never fail the job on SLA breach.
+          K6_FAIL_ON_BREACH: ${{ matrix.sla_gate }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          K6_FLAGS="--compatibility-mode=experimental_enhanced --out json=reports/${{ matrix.suite }}-raw.json"
+          if [[ "${K6_FAIL_ON_BREACH}" == "true" ]]; then
+            k6 run $K6_FLAGS ${{ matrix.script }}
+          else
+            k6 run $K6_FLAGS ${{ matrix.script }} || echo "::warning::${{ matrix.suite }} thresholds breached (informational gate)"
+          fi
+
+      - name: Upload run artefacts
+        if: always()
+        uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
+        with:
+          name: k6-${{ matrix.suite }}-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish JUnit to PR checks
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@82082dac68ad6a19d980f8ce817e108b9f496c2a # v2.17.1
+        with:
+          files: reports/junit.xml
+          check_name: "k6 ${{ matrix.suite }} thresholds"
+          comment_mode: off
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stage 4: PR summary comment aggregating every shard.
+  # ──────────────────────────────────────────────────────────────────
+  pr_summary:
+    name: Comment on PR
+    if: github.event_name == 'pull_request' && always()
+    needs: perf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: k6-*-${{ github.run_id }}
+          path: all-reports
+          merge-multiple: true
+
+      - name: Render summary
+        id: render
+        run: |
+          set -euo pipefail
+          {
+            echo "### k6 Performance Results"
+            echo ""
+            echo "| Suite | Status | p95 | Errors | Checks |"
+            echo "|-------|--------|-----|--------|--------|"
+            for f in all-reports/*-summary.json; do
+              [[ -f "$f" ]] || continue
+              node -e "
+                const d = require('./$f');
+                const m = d.metrics || {};
+                const p95 = ((m.http_req_duration||{}).values||{})['p(95)'] ?? 0;
+                const err = ((m.http_req_failed||{}).values||{}).rate ?? 0;
+                const chk = ((m.checks||{}).values||{}).rate ?? 0;
+                const thr = Object.values(m).flatMap(x => Object.values(x.thresholds||{}));
+                const ok = thr.every(t => t.ok);
+                const name = '$f'.split('/').pop().replace('-summary.json','');
+                console.log(\`| \${name} | \${ok?':white_check_mark:':':x:'} | \${p95.toFixed(1)}ms | \${(err*100).toFixed(2)}% | \${(chk*100).toFixed(1)}% |\`);
+              "
+            done
+          } > summary.md
+          {
+            echo 'body<<EOF'
+            cat summary.md
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upsert PR comment
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.render.outputs.body }}
+          edit-mode: replace
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stage 5: soak — decoupled, only on main or manual dispatch.
+  # ──────────────────────────────────────────────────────────────────
+  soak:
+    name: k6 · soak (30m)
+    if: github.ref == 'refs/heads/main' || github.event.inputs.suite == 'soak_only'
+    needs: perf
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
       - name: Install k6
         run: |
-          sudo apt-get update
-          sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-          echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6-stable.list
-          sudo apt-get update
-          sudo apt-get install -y k6
+          curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "k6-v${K6_VERSION}-linux-amd64/k6"
 
-      - name: Run load test
+      - name: Run soak
         run: |
           mkdir -p reports
-          k6 run --out json=reports/results.json tests/load/load-test.ts
+          k6 run --compatibility-mode=experimental_enhanced --out json=reports/soak-raw.json tests/soak/soak-test.ts
 
-      - name: Upload results
+      - name: Upload soak artefacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
         with:
-          name: k6-results
-          path: reports/results.json
-          if-no-files-found: ignore
+          name: k6-soak-${{ github.run_id }}
+          path: reports/
+          retention-days: 90

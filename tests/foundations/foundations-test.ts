@@ -1,51 +1,48 @@
-import { check, sleep } from "k6";
-import http from "k6/http";
+/**
+ * Foundations — baseline smoke at 10 VUs / 30s.
+ * First test anyone runs after cloning. If this fails, don't bother
+ * running the heavier tests.
+ */
+
 import { Options } from "k6/options";
+import { getEnv } from "../../config/environments.ts";
+import { thresholdsFor } from "../../config/thresholds.ts";
+import { http_ } from "../../utils/http-client.ts";
+import { assertOk, thinkTime } from "../../utils/helpers.ts";
+import { cyclePage, nextPost, pickUserId } from "../../utils/data-factory.ts";
+
+export { handleSummary } from "../../utils/summary.ts";
+
+const env = getEnv();
 
 export const options: Options = {
   vus: 10,
   duration: "30s",
-  thresholds: {
-    http_req_duration: ["p(95)<500"],
-    http_req_failed: ["rate<0.01"],
-    checks: ["rate>=0.95"],
-  },
+  thresholds: thresholdsFor("foundation"),
+  tags: env.tags,
+  noConnectionReuse: false,
+  discardResponseBodies: false,
 };
 
-export default function () {
-  // GET list of users
-  const listRes = http.get("https://jsonplaceholder.typicode.com/users");
+export default function (): void {
+  const api = http_(env);
 
-  check(listRes, {
-    "list: status 200": (r) => r.status === 200,
-    "list: response < 500ms": (r) => r.timings.duration < 500,
-  });
+  const listRes = api
+    .endpoint("users_list")
+    .get(`${env.baseUrl}/users?_page=${cyclePage(__ITER, 2)}`);
+  assertOk(listRes, "users_list", 200, 500);
+  thinkTime(0.8, 1.4);
 
-  sleep(1);
+  const userRes = api
+    .endpoint("user_detail")
+    .get(`${env.baseUrl}/users/${pickUserId()}`);
+  assertOk(userRes, "user_detail", 200, 500);
+  thinkTime(0.8, 1.4);
 
-  // GET single user
-  const userId = Math.floor(Math.random() * 10) + 1;
-  const singleRes = http.get(
-    `https://jsonplaceholder.typicode.com/users/${userId}`
-  );
-
-  check(singleRes, {
-    "single: status 200": (r) => r.status === 200,
-    "single: response < 500ms": (r) => r.timings.duration < 500,
-  });
-
-  sleep(1);
-
-  // POST create
-  const createRes = http.post(
-    "https://jsonplaceholder.typicode.com/posts",
-    JSON.stringify({ title: "k6 test", body: "load test", userId: __VU }),
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(createRes, {
-    "create: status 201": (r) => r.status === 201,
-  });
-
-  sleep(1);
+  const seed = nextPost(__ITER);
+  const createRes = api
+    .endpoint("post_create")
+    .post(`${env.baseUrl}/posts`, { ...seed, userId: __VU });
+  assertOk(createRes, "post_create", 201, 500);
+  thinkTime(0.8, 1.4);
 }

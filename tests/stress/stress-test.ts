@@ -1,77 +1,70 @@
-import { check, sleep } from "k6";
-import http from "k6/http";
-import { Options } from "k6/options";
-import { Trend } from "k6/metrics";
+/**
+ * Stress — 0 → 200 VUs to find the breaking point.
+ *
+ * Uses ramping-arrival-rate so we apply a request-rate ceiling rather
+ * than a VU count — VU-based stress hides server-side saturation
+ * because slowing responses throttle the pressure. Arrival rate keeps
+ * pressure constant as the target degrades.
+ */
 
-const stressTrend = new Trend("stress_response_time_ms", true);
+import { Options } from "k6/options";
+import { getEnv } from "../../config/environments.ts";
+import { thresholdsFor } from "../../config/thresholds.ts";
+import { http_ } from "../../utils/http-client.ts";
+import { assertOk, thinkTime } from "../../utils/helpers.ts";
+import { cyclePage, nextPost, pickUserId } from "../../utils/data-factory.ts";
+
+export { handleSummary } from "../../utils/summary.ts";
+
+const env = getEnv();
 
 export const options: Options = {
-  stages: [
-    { duration: "2m", target: 50 },
-    { duration: "3m", target: 100 },
-    { duration: "3m", target: 150 },
-    { duration: "2m", target: 200 },
-    { duration: "2m", target: 0 },
-  ],
-  thresholds: {
-    http_req_duration: ["p(95)<1000"],
-    http_req_failed: ["rate<0.05"],
-    checks: ["rate>=0.90"],
-    stress_response_time_ms: ["p(95)<1000"],
+  scenarios: {
+    breaking_point: {
+      executor: "ramping-arrival-rate",
+      startRate: 20,
+      timeUnit: "1s",
+      preAllocatedVUs: 50,
+      maxVUs: 400,
+      stages: [
+        { duration: "2m", target: 50 },
+        { duration: "3m", target: 100 },
+        { duration: "3m", target: 150 },
+        { duration: "2m", target: 200 },
+        { duration: "2m", target: 0 },
+      ],
+      tags: { scenario: "breaking_point" },
+    },
   },
+  thresholds: thresholdsFor("stress_breaking_point"),
+  tags: env.tags,
 };
 
-export default function () {
-  const page = ((__ITER % 3) + 1);
+export default function (): void {
+  const api = http_(env).maxAttempts(1); // don't mask breakage with retries
 
-  const listRes = http.get(
-    `https://jsonplaceholder.typicode.com/users?_page=${page}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
+  const listRes = api
+    .endpoint("users_list")
+    .get(`${env.baseUrl}/users?_page=${cyclePage(__ITER, 3)}`);
+  assertOk(listRes, "users_list", 200, 1000);
+  thinkTime(0.3, 0.7);
 
-  check(listRes, {
-    "list: status 200": (r) => r.status === 200,
-    "list: response < 1000ms": (r) => r.timings.duration < 1000,
-  });
+  const userRes = api
+    .endpoint("user_detail")
+    .get(`${env.baseUrl}/users/${pickUserId()}`);
+  assertOk(userRes, "user_detail", 200, 1000);
+  thinkTime(0.2, 0.5);
 
-  stressTrend.add(listRes.timings.duration);
+  const seed = nextPost(__ITER);
+  const createRes = api
+    .endpoint("post_create")
+    .post(`${env.baseUrl}/posts`, { ...seed, userId: __VU });
+  assertOk(createRes, "post_create", 201, 1000);
 
-  sleep(0.5);
+  const patchRes = api
+    .endpoint("post_patch")
+    .patch(`${env.baseUrl}/posts/${pickUserId()}`, { title: seed.title });
+  assertOk(patchRes, "post_patch", 200, 1000);
 
-  const userId = Math.floor(Math.random() * 10) + 1;
-  const singleRes = http.get(
-    `https://jsonplaceholder.typicode.com/users/${userId}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(singleRes, {
-    "single: status 200": (r) => r.status === 200,
-    "single: response < 1000ms": (r) => r.timings.duration < 1000,
-  });
-
-  stressTrend.add(singleRes.timings.duration);
-
-  sleep(0.3);
-
-  const createRes = http.post(
-    "https://jsonplaceholder.typicode.com/posts",
-    JSON.stringify({ title: `stress-vu-${__VU}`, body: "stress test", userId: __VU }),
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(createRes, {
-    "create: status 201": (r) => r.status === 201,
-  });
-
-  const patchRes = http.patch(
-    `https://jsonplaceholder.typicode.com/posts/${userId}`,
-    JSON.stringify({ title: "updated" }),
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(patchRes, {
-    "patch: status 200": (r) => r.status === 200,
-  });
-
-  sleep(0.5);
+  thinkTime(0.3, 0.7);
 }

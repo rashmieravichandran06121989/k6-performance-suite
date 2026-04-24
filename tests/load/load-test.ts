@@ -1,58 +1,59 @@
-import { check, sleep } from "k6";
-import http from "k6/http";
+/**
+ * Load — ramp to 20, hold at 50 for 3m, ramp down. Mimics a busy hour.
+ *
+ * Uses k6 scenarios rather than the top-level stages shorthand so we
+ * can name the executor and attach exec tags — makes Grafana drill-down
+ * straightforward.
+ */
+
 import { Options } from "k6/options";
+import { getEnv } from "../../config/environments.ts";
+import { thresholdsFor } from "../../config/thresholds.ts";
+import { http_ } from "../../utils/http-client.ts";
+import { assertOk, thinkTime } from "../../utils/helpers.ts";
+import { cyclePage, nextPost, pickUserId } from "../../utils/data-factory.ts";
+
+export { handleSummary } from "../../utils/summary.ts";
+
+const env = getEnv();
 
 export const options: Options = {
-  stages: [
-    { duration: "1m", target: 20 },
-    { duration: "3m", target: 50 },
-    { duration: "1m", target: 0 },
-  ],
-  thresholds: {
-    http_req_duration: ["p(95)<500", "p(99)<800"],
-    http_req_failed: ["rate<0.01"],
-    checks: ["rate>=0.95"],
+  scenarios: {
+    steady_hour: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "1m", target: 20 },
+        { duration: "3m", target: 50 },
+        { duration: "1m", target: 0 },
+      ],
+      gracefulRampDown: "30s",
+      tags: { scenario: "steady_hour" },
+    },
   },
+  thresholds: thresholdsFor("steady_load"),
+  tags: env.tags,
 };
 
-export default function () {
-  const page = ((__ITER % 2) + 1);
+export default function (): void {
+  const api = http_(env);
 
-  const listRes = http.get(
-    `https://jsonplaceholder.typicode.com/users?_page=${page}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
+  const listRes = api
+    .endpoint("users_list")
+    .get(`${env.baseUrl}/users?_page=${cyclePage(__ITER, 2)}`);
+  assertOk(listRes, "users_list", 200, 500);
+  thinkTime(0.5, 1.5);
 
-  check(listRes, {
-    "list: status 200": (r) => r.status === 200,
-    "list: response < 500ms": (r) => r.timings.duration < 500,
-  });
+  const userRes = api
+    .endpoint("user_detail")
+    .get(`${env.baseUrl}/users/${pickUserId()}`);
+  assertOk(userRes, "user_detail", 200, 500);
+  thinkTime(0.5, 1.5);
 
-  sleep(1);
-
-  const userId = Math.floor(Math.random() * 10) + 1;
-
-  const singleRes = http.get(
-    `https://jsonplaceholder.typicode.com/users/${userId}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(singleRes, {
-    "single: status 200": (r) => r.status === 200,
-    "single: response < 500ms": (r) => r.timings.duration < 500,
-  });
-
-  sleep(1);
-
-  const createRes = http.post(
-    "https://jsonplaceholder.typicode.com/posts",
-    JSON.stringify({ title: "load test", body: "k6 run", userId: __VU }),
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(createRes, {
-    "create: status 201": (r) => r.status === 201,
-  });
-
-  sleep(1);
+  const seed = nextPost(__ITER);
+  const createRes = api
+    .endpoint("post_create")
+    .post(`${env.baseUrl}/posts`, { ...seed, userId: __VU });
+  assertOk(createRes, "post_create", 201, 500);
+  thinkTime(0.5, 1.5);
 }

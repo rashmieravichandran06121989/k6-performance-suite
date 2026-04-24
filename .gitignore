@@ -1,7 +1,25 @@
+node_modules
 node_modules/
-reports/*.json
-reports/*.html
+reports/
+!reports/.gitkeep
+dist/
+coverage/
+
+# secrets & env
 .env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
 *.log
 .DS_Store
-dist/
+Thumbs.db
+
+# Trivy / scan outputs
+trivy-results.sarif
+*.sarif
+
+# stray install artefacts from local npm run — not part of the repo
+refactored/

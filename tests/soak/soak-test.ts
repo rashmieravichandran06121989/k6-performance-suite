@@ -1,87 +1,96 @@
-import { check, sleep } from "k6";
-import http from "k6/http";
+/**
+ * Soak — 30 VUs for 30 min. Watches for memory leaks, connection-pool
+ * exhaustion, and drift in latency over time.
+ *
+ * Emits `soak_response_time_ms` and tags every request with the
+ * elapsed-minute bucket so drift is visible per-bucket in Grafana.
+ */
+
 import { Options } from "k6/options";
 import { Trend } from "k6/metrics";
+import { getEnv } from "../../config/environments.ts";
+import { thresholdsFor } from "../../config/thresholds.ts";
+import { http_ } from "../../utils/http-client.ts";
+import { assertOk, thinkTime } from "../../utils/helpers.ts";
+import { cyclePage, nextPost, pickUserId } from "../../utils/data-factory.ts";
 
-const soakTrend = new Trend("soak_response_time_ms", true);
+export { handleSummary } from "../../utils/summary.ts";
+
+const env = getEnv();
+const driftTrend = new Trend("soak_response_time_ms", true);
 
 export const options: Options = {
-  stages: [
-    { duration: "2m",  target: 30 },
-    { duration: "26m", target: 30 },
-    { duration: "2m",  target: 0 },
-  ],
+  scenarios: {
+    endurance: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "2m",  target: 30 },
+        { duration: "26m", target: 30 },
+        { duration: "2m",  target: 0 },
+      ],
+      gracefulRampDown: "1m",
+      tags: { scenario: "endurance" },
+    },
+  },
   thresholds: {
-    http_req_duration: ["p(95)<500"],
-    http_req_failed: ["rate<0.005"],
-    checks: ["rate>=0.95"],
+    ...thresholdsFor("soak_endurance"),
     soak_response_time_ms: ["p(95)<500", "p(99)<800"],
   },
+  tags: env.tags,
 };
 
-export function setup() {
-  console.log("soak test starting — 30 VUs for 30 min against jsonplaceholder");
+// Start timestamp captured once in init so every VU sees the same anchor.
+const RUN_START = Date.now();
+
+function elapsedBucket(): string {
+  const minutes = Math.floor((Date.now() - RUN_START) / 60000);
+  const bucket = Math.floor(minutes / 5) * 5;
+  return `${bucket}-${bucket + 5}m`;
 }
 
-export function teardown() {
-  console.log("soak complete — check soak_response_time_ms trend for drift");
+export function setup(): { startedAt: number } {
+  console.log(`[soak] starting — ${env.name} — 30 VUs × 30 min`);
+  return { startedAt: Date.now() };
 }
 
-export default function () {
-  const page = ((__ITER % 2) + 1);
+export function teardown(ctx: { startedAt: number }): void {
+  const mins = (Date.now() - ctx.startedAt) / 60000;
+  console.log(`[soak] complete — ran ${mins.toFixed(1)}m — inspect soak_response_time_ms for drift`);
+}
 
-  const listRes = http.get(
-    `https://jsonplaceholder.typicode.com/users?_page=${page}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
+export default function (): void {
+  const api = http_(env).tag("elapsed", elapsedBucket());
 
-  check(listRes, {
-    "list: status 200": (r) => r.status === 200,
-    "list: response < 500ms": (r) => r.timings.duration < 500,
-  });
+  const listRes = api
+    .endpoint("users_list")
+    .get(`${env.baseUrl}/users?_page=${cyclePage(__ITER, 2)}`);
+  assertOk(listRes, "users_list", 200, 500);
+  driftTrend.add(listRes.timings.duration);
+  thinkTime(1.5, 2.5);
 
-  soakTrend.add(listRes.timings.duration);
+  const userRes = api
+    .endpoint("user_detail")
+    .get(`${env.baseUrl}/users/${pickUserId()}`);
+  assertOk(userRes, "user_detail", 200, 500);
+  driftTrend.add(userRes.timings.duration);
+  thinkTime(0.8, 1.2);
 
-  sleep(2);
+  const seed = nextPost(__ITER);
+  const createRes = api
+    .endpoint("post_create")
+    .post(`${env.baseUrl}/posts`, { ...seed, userId: __VU });
+  assertOk(createRes, "post_create", 201, 500);
+  driftTrend.add(createRes.timings.duration);
 
-  const userId = Math.floor(Math.random() * 10) + 1;
-  const singleRes = http.get(
-    `https://jsonplaceholder.typicode.com/users/${userId}`,
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(singleRes, {
-    "single: status 200": (r) => r.status === 200,
-    "single: response < 500ms": (r) => r.timings.duration < 500,
-  });
-
-  soakTrend.add(singleRes.timings.duration);
-
-  sleep(1);
-
-  const createRes = http.post(
-    "https://jsonplaceholder.typicode.com/posts",
-    JSON.stringify({ title: "soak test", body: "endurance run", userId: __VU }),
-    { headers: { "Content-Type": "application/json" } }
-  );
-
-  check(createRes, {
-    "create: status 201": (r) => r.status === 201,
-  });
-
-  soakTrend.add(createRes.timings.duration);
-
-  // every 5th iteration hit a slower endpoint
+  // Every 5th iter: heavier endpoint so drift shows up on slow paths too.
   if (__ITER % 5 === 0) {
-    const slowRes = http.get(
-      "https://jsonplaceholder.typicode.com/photos?_limit=10",
-      { headers: { "Content-Type": "application/json" } }
-    );
-    check(slowRes, {
-      "slow endpoint: status 200": (r) => r.status === 200,
-    });
-    soakTrend.add(slowRes.timings.duration);
+    const slowRes = api
+      .endpoint("photos_slow")
+      .get(`${env.baseUrl}/photos?_limit=10`);
+    assertOk(slowRes, "photos_slow", 200, 800);
+    driftTrend.add(slowRes.timings.duration);
   }
 
-  sleep(2);
+  thinkTime(1.5, 2.5);
 }
